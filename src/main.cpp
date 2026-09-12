@@ -5,8 +5,8 @@
 
 // Global instances - motors share same L298N pins/channels (26/27/25/14/12/33, ch 0/1)
 // RobotControl holds single source of truth: g_mode + g_speed
-// LineFollower lib owns everything line-related: 2xIR (36/39) black line (HIGH=line),
-// fixed straight 80 / turn 100, 10ms AUTO burst (see lib/LineFollower/src/LineFollower.h)
+// LineFollower lib owns everything line-related: 3xIR digital L=4 M=5 R=15,
+// middle black + sides white = centered, straight 100 / pivot 80 (see lib/LineFollower)
 static RemoteControl g_remoteControl;
 static LineFollower g_lineFollower; // lib defaults: 2 sensors, black line HIGH, fixed 80/100
 
@@ -26,9 +26,9 @@ void setup()
   g_remoteControl.setHoldTimeout(0); // press-and-hold: press F/B/L/R to move, release (0) to stop
   g_lineFollower.begin(false);  // false = don't re-init motors (line speeds fixed 80/100 from lib)
 
-  Serial.println("=== LineFollower (2xIR black line, 100/80 adjustable) + Remote ===");
+  Serial.println("=== LineFollower (3xIR 4/5/15, middle black) + Remote ===");
   RobotControl::printState(Serial);
-  Serial.println("Line: 2xIR L=36 R=39 black-line (HIGH=line), straight 100 pivot 80, Circle/Square adjust live.");
+  Serial.println("Line: 3xIR digital L=4 M=5 R=15 (HIGH=black), centered=middle black+sides white, straight 100 pivot 80.");
   Serial.println("IR values stream every loop; all white -> motors STOP.");
   Serial.println("GamePad (Arduino Bluetooth Controller):");
   Serial.println("  D-Pad Up/U/F=forward Down/D/B=back Left=L Right=R G/I/H/J=diagonals Z=stop");

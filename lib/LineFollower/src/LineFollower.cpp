@@ -1,9 +1,9 @@
 #include "LineFollower.h"
 #include "RobotControl.h"
 
-// ---------- Config defaults: 2-sensor black line, straight 100 / pivot 80 (controller-adjustable) ----------
+// ---------- Config defaults: 3-sensor black line L=4 M=5 R=15, straight 100 / pivot 80 ----------
 LineFollower::Config::Config()
-    : numSensors(2U),
+    : numSensors(3U),
       pinLeftIn1(26U),
       pinLeftIn2(27U),
       pinLeftEn(25U),
@@ -18,8 +18,8 @@ LineFollower::Config::Config()
       turnSpeed(80U), // slow pivot turns (both wheels opposite)
       maxSpeed(150U),
       minSpeed(0U),
-      invertSensorLogic(false), // analog HIGH = black = line (value > th = line)
-      analogSensors(true),
+      invertSensorLogic(false), // digital HIGH = black = line
+      analogSensors(false), // digital DO pins (GPIO5 has no ADC); threshold set by module pot
       analogThreshold(2000U),
       lineIsBlack(true),
       kp(0.12f),
@@ -29,13 +29,14 @@ LineFollower::Config::Config()
       autoBurstMs(10UL),
       debug(true) // stream IR values every update (Serial 115200)
 {
-  // 2 sensors left->right on ADC1 input-only pins (avoid strapping + motor pins)
-  sensorPins[0] = 4U; // VP = LEFT
-  sensorPins[1] = 15U; // VN = RIGHT
-  sensorPins[2] = 34U; // spare
-  sensorPins[3] = 35U; // spare
-  sensorPins[4] = 32U; // spare
-  sensorPins[5] = 33U; // unused (33 is motor EN)
+  // 3 sensors left->right as plain digital inputs (4/5/15 are strapping pins,
+  // safe as inputs after boot; do NOT hold GPIO0-family low at reset)
+  sensorPins[0] = 4U;  // LEFT
+  sensorPins[1] = 5U;  // MIDDLE
+  sensorPins[2] = 15U; // RIGHT
+  sensorPins[3] = 34U; // spare
+  sensorPins[4] = 35U; // spare
+  sensorPins[5] = 32U; // spare
 }
 
 // ---------- Ctor ----------
@@ -396,25 +397,11 @@ void LineFollower::update()
   if (m_config.debug)
   {
     printSensors(Serial);
-    // Stuck-at-0 diagnostic: both channels near GND = wiring/power fault, not a line issue.
-    // Throttled to one hint every ~2s so the value stream stays readable.
-    if (m_config.numSensors == 2U && m_sensorValues[0] < 50U && m_sensorValues[1] < 50U)
-    {
-      static uint32_t s_lastWarnMs = 0;
-      uint32_t now = millis();
-      if (now - s_lastWarnMs > 2000UL)
-      {
-        s_lastWarnMs = now;
-        Serial.println("[LineFollower] WARN both IR ~0: check VCC/GND, AO (not DO) to 36/39, common GND, 3V3 vs 5V module supply.");
-      }
-    }
   }
 
   int16_t pos = getPosition();
 
-  // 2-sensor fixed-speed drive (straight 80, pivot turns slow at turnSpeed).
-  // Turns spin BOTH wheels opposite (pivot) instead of stopping one wheel.
-  // Independent of controller speed adjuster. All white -> stop.
+  // 2-sensor pivot drive (legacy path, kept for 2-sensor configs).
   if (m_config.numSensors == 2U)
   {
     if (isLineLost())
@@ -433,6 +420,46 @@ void LineFollower::update()
     else
     {
       drive(m_config.turnSpeed, -(int16_t)m_config.turnSpeed); // pivot right, slow
+    }
+    return;
+  }
+
+  // 3-sensor pattern drive (L=4 M=5 R=15, HIGH=black, LOW=white).
+  // Centered = middle black + sides white. Controller speed via shared global.
+  if (m_config.numSensors == 3U)
+  {
+    if (isLineLost())
+    {
+      stop(); // all white: line lost, halt
+      return;
+    }
+    const bool L = m_digitalValues[0];
+    const bool M = m_digitalValues[1];
+    const bool R = m_digitalValues[2];
+    const uint8_t inner = (uint8_t)(m_config.baseSpeed * 40U / 100U); // gentle-turn inner wheel
+    if ((!L && M && !R) || (L && M && R) || (L && !M && R))
+    {
+      drive(m_config.baseSpeed, m_config.baseSpeed); // centered / intersection / straddle
+    }
+    else if (L && M && !R)
+    {
+      drive(inner, m_config.baseSpeed); // gentle left
+    }
+    else if (!L && M && R)
+    {
+      drive(m_config.baseSpeed, inner); // gentle right
+    }
+    else if (L)
+    {
+      drive(-(int16_t)m_config.turnSpeed, m_config.turnSpeed); // sharp pivot left
+    }
+    else if (R)
+    {
+      drive(m_config.turnSpeed, -(int16_t)m_config.turnSpeed); // sharp pivot right
+    }
+    else
+    {
+      drive(m_config.baseSpeed, m_config.baseSpeed); // fallback straight
     }
     return;
   }

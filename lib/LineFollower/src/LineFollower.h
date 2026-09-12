@@ -6,24 +6,25 @@
 /**
  * @brief IR line detection + PID path correction for ESP32 + L298N.
  *
- * Default: 2-sensor black-line follower, controller-adjustable speeds:
- *   pins {36 (left), 39 (right)} (ADC1, no conflict with motors 26/27/25/14/12/33)
- *   analog + threshold 2000, HIGH = black = line (no invert)
+ * Default: 3-sensor black-line follower, controller-adjustable speeds:
+ *   LEFT=4, MIDDLE=5, RIGHT=15 (digital DO pins; GPIO5 has no ADC so analog is off)
+ *   HIGH = black = line, LOW = white. Centered = middle black, sides white.
  *   straight 100 / pivot 80 defaults, Circle(+10)/Square(-10) adjust live (shared global).
- *   baseSpeed 80 straight, turnSpeed 100 on turns.
  *
- * 2-sensor logic (black line HIGH, values stream on Serial):
- *   L+R on line (both black) -> forward base/base (intersection)
- *   neither on line (both white = all white) -> STOP motors (line lost)
- *   left only -> slow pivot left: wheels opposite at turnSpeed
- *   right only -> slow pivot right: wheels opposite at turnSpeed
- * 5/3-sensor mode still uses PID: left = base - correction, right = base + correction.
+ * 3-sensor logic (values stream on Serial):
+ *   middle only (0,1,0) -> centered, forward base/base
+ *   all black (1,1,1) or straddle (1,0,1) -> intersection, forward
+ *   left+middle (1,1,0) -> gentle left (inner slowed), middle+right -> gentle right
+ *   left only -> sharp pivot left (wheels opposite at turnSpeed)
+ *   right only -> sharp pivot right
+ *   all white (0,0,0) -> STOP motors (line lost)
+ * 5-sensor mode still uses PID: left = base - correction, right = base + correction.
  *
  * AUTO entry: call startAuto() on MANUAL->LINE_FOLLOWER switch. update() drives a
- * short forward burst (autoBurstMs, default 10ms) then PID.
+ * short forward burst (autoBurstMs, default 10ms) then line logic.
  *
  * Usage:
- *   LineFollower lf; // 2 sensors, black line, straight 100 / pivot 80, controller-adjustable
+ *   LineFollower lf; // 3 sensors (4/5/15), black line, straight 100 / pivot 80, controller-adjustable
  *   lf.begin(false); // false = motors already inited by RemoteControl
  *   onModeSwitchToAuto { lf.startAuto(); }
  *   loop { lf.update(); }
