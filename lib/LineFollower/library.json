@@ -1,0 +1,12 @@
+{
+  "name": "LineFollower",
+  "version": "1.0.0",
+  "description": "IR sensor array line detection + PID path correction for ESP32 + L298N (5-channel IR, weighted position, auto-calibration)",
+  "keywords": "ir, line follower, pid, esp32, l298n",
+  "authors": {
+    "name": "LineFollower",
+    "maintainer": true
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

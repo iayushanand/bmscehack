@@ -1,0 +1,12 @@
+{
+  "name": "RemoteControl",
+  "version": "1.0.0",
+  "description": "ESP32 Bluetooth Classic remote control for L298N dual motor (hold-to-run F/B/L/R/S protocol with auto-stop)",
+  "keywords": "bluetooth, esp32, l298n, motor, remote",
+  "authors": {
+    "name": "LineFollower",
+    "maintainer": true
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
