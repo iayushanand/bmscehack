@@ -1,0 +1,369 @@
+/* ===========================================================
+   ROVER-X CONTROL DECK — tokens
+   =========================================================== */
+:root{
+  --carbon-0: #05070b;
+  --carbon-1: #0b0f16;
+  --panel: #10161f;
+  --panel-edge: #1c2531;
+  --hairline: #232e3d;
+
+  --text-hi: #e9eef3;
+  --text-mid: #8a97a6;
+  --text-lo: #4d5866;
+
+  --cyan: #00e5ff;
+  --cyan-dim: #0a4a56;
+  --amber: #ff9f43;
+  --red: #ff3b3b;
+  --green: #39ff88;
+  --green-dim: #0d3d24;
+
+  --font-display: 'Orbitron', sans-serif;
+  --font-ui: 'Rajdhani', sans-serif;
+
+  --radius: 14px;
+}
+
+*{ box-sizing: border-box; }
+
+html, body{
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--carbon-0);
+  font-family: var(--font-ui);
+  color: var(--text-hi);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+body{
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(0,229,255,0.07), transparent 40%),
+    radial-gradient(circle at 85% 100%, rgba(255,159,67,0.06), transparent 45%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 3px);
+  display: flex;
+  justify-content: center;
+}
+
+.chassis{
+  width: 100%;
+  max-width: 460px;
+  min-height: 100vh;
+  padding: 18px 18px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ===================== TOP BAR ===================== */
+.topbar{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 2px;
+}
+
+.brand{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 1px;
+}
+.brand-mark{ color: var(--cyan); font-size: 14px; }
+.brand-name .accent{ color: var(--cyan); }
+
+.status{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--text-mid);
+}
+.status-dot{
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.status-dot.online{ background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-dot.offline{ background: var(--red); box-shadow: 0 0 8px var(--red); animation: none; }
+
+@keyframes pulse{
+  0%, 100%{ opacity: 1; }
+  50%{ opacity: 0.35; }
+}
+
+/* ===================== PHASE STRIP ===================== */
+.phase-strip{
+  display: flex;
+}
+.phase-chip{
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 1.2px;
+  color: var(--cyan);
+  background: linear-gradient(90deg, var(--cyan-dim), transparent);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--cyan);
+  padding: 8px 14px;
+  border-radius: 6px;
+  width: 100%;
+}
+
+/* ===================== PANEL BASE ===================== */
+section, footer.engine-panel{
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.panel-label{
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: var(--text-lo);
+  margin-bottom: 14px;
+}
+
+/* ===================== GAUGE ===================== */
+.gauge-panel{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.gauge-wrap{
+  position: relative;
+  width: 220px;
+  height: 220px;
+}
+
+.gauge-svg{ width: 100%; height: 100%; transform: rotate(-90deg); }
+
+.gauge-track{
+  fill: none;
+  stroke: var(--hairline);
+  stroke-width: 10;
+}
+
+.gauge-fill{
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 578;
+  stroke-dashoffset: 578;
+  filter: drop-shadow(0 0 6px rgba(0,229,255,0.65));
+  transition: stroke-dashoffset 0.25s ease, stroke 0.25s ease;
+}
+
+.gauge-readout{
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.gauge-value{
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--text-hi);
+  text-shadow: 0 0 18px rgba(0,229,255,0.25);
+}
+
+.gauge-unit{
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-mid);
+}
+
+.slider-row{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slider-label{
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-lo);
+  letter-spacing: 1px;
+}
+
+.speed-slider{
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--cyan) 0%, var(--cyan) var(--fill, 0%), var(--hairline) var(--fill, 0%), var(--hairline) 100%);
+  outline: none;
+}
+.speed-slider::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--text-hi);
+  border: 3px solid var(--cyan);
+  box-shadow: 0 0 10px rgba(0,229,255,0.7);
+  cursor: pointer;
+}
+.speed-slider::-moz-range-thumb{
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--text-hi);
+  border: 3px solid var(--cyan);
+  box-shadow: 0 0 10px rgba(0,229,255,0.7);
+  cursor: pointer;
+  border: none;
+}
+
+/* ===================== MODE TOGGLE ===================== */
+.mode-toggle{
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--carbon-1);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.mode-slider{
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  height: calc(100% - 8px);
+  background: linear-gradient(135deg, var(--cyan-dim), rgba(0,229,255,0.18));
+  border: 1px solid var(--cyan);
+  border-radius: 8px;
+  transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+  z-index: 0;
+}
+.mode-slider.pos-auto{ transform: translateX(100%); border-color: var(--amber); background: linear-gradient(135deg, #4a2f0f, rgba(255,159,67,0.16)); }
+
+.mode-btn{
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-mid);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: 1px;
+  padding: 12px 0;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+.mode-btn.active{ color: var(--text-hi); }
+
+/* ===================== AUTO TELEMETRY ===================== */
+.telemetry-row{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.telemetry-cell{
+  background: var(--carbon-1);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tele-label{
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-lo);
+}
+.tele-value{
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--amber);
+}
+
+/* hide/show based on mode */
+.auto-panel{ transition: opacity 0.2s ease; }
+.hidden-panel{ display: none; }
+
+/* ===================== ENGINE CONTROLS ===================== */
+.engine-panel{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+  margin-top: auto;
+}
+
+.engine-btn{
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--green);
+  background: linear-gradient(180deg, var(--green-dim), var(--carbon-1));
+  border-radius: 12px;
+  padding: 20px;
+  cursor: pointer;
+}
+.engine-btn-label{
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: var(--green);
+  text-shadow: 0 0 12px rgba(57,255,136,0.5);
+}
+.engine-btn.running{
+  border-color: var(--red);
+  background: linear-gradient(180deg, #3d0d0d, var(--carbon-1));
+}
+.engine-btn.running .engine-btn-label{
+  color: var(--red);
+  text-shadow: 0 0 12px rgba(255,59,59,0.5);
+}
+.engine-btn-glow{
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(circle, rgba(57,255,136,0.15), transparent 60%);
+  animation: rotate-glow 4s linear infinite;
+  pointer-events: none;
+}
+.engine-btn.running .engine-btn-glow{
+  background: radial-gradient(circle, rgba(255,59,59,0.15), transparent 60%);
+}
+@keyframes rotate-glow{
+  from{ transform: rotate(0deg); }
+  to{ transform: rotate(360deg); }
+}
+
+/* ===================== RESPONSIVE ===================== */
+@media (max-width: 380px){
+  .gauge-wrap{ width: 190px; height: 190px; }
+  .gauge-value{ font-size: 44px; }
+}
