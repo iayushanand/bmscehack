@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ROVER-X // Control Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="chassis">
+
+    <!-- TOP STATUS BAR -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">◆</span>
+        <span class="brand-name">ROVER<span class="accent">-X</span></span>
+      </div>
+      <div class="status" id="connStatus">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">LINKING…</span>
+      </div>
+    </header>
+
+    <!-- PHASE / STATE STRIP -->
+    <div class="phase-strip">
+      <div class="phase-chip active" id="phaseChip">PHASE 1 · MANUAL OVERRIDE</div>
+    </div>
+
+    <!-- SPEED GAUGE -->
+    <section class="gauge-panel">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 220 220" class="gauge-svg">
+          <circle cx="110" cy="110" r="92" class="gauge-track"></circle>
+          <circle cx="110" cy="110" r="92" class="gauge-fill" id="gaugeFill"></circle>
+        </svg>
+        <div class="gauge-readout">
+          <span class="gauge-value" id="speedValue">0</span>
+          <span class="gauge-unit">% THROTTLE</span>
+        </div>
+      </div>
+
+      <div class="slider-row">
+        <span class="slider-label">MIN</span>
+        <input type="range" min="0" max="100" value="0" step="1" id="speedSlider" class="speed-slider">
+        <span class="slider-label">MAX</span>
+      </div>
+    </section>
+
+    <!-- MODE TOGGLE -->
+    <section class="mode-panel">
+      <span class="panel-label">DRIVE MODE</span>
+      <div class="mode-toggle" id="modeToggle">
+        <button class="mode-btn active" data-mode="manual" id="btnManual">MANUAL</button>
+        <button class="mode-btn" data-mode="auto" id="btnAuto">AUTONOMOUS</button>
+        <div class="mode-slider" id="modeSlider"></div>
+      </div>
+    </section>
+
+    <!-- AUTO MODE READOUT (autonomous mode only) -->
+    <section class="auto-panel" id="autoPanel">
+      <span class="panel-label">AUTONOMOUS TELEMETRY</span>
+      <div class="telemetry-row">
+        <div class="telemetry-cell">
+          <span class="tele-label">LINE SENSOR</span>
+          <span class="tele-value" id="lineVal">--</span>
+        </div>
+        <div class="telemetry-cell">
+          <span class="tele-label">OBSTACLE DIST</span>
+          <span class="tele-value" id="distVal">-- cm</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAIN ENGINE TOGGLE -->
+    <footer class="engine-panel">
+      <button class="engine-btn" id="engineBtn">
+        <span class="engine-btn-glow"></span>
+        <span class="engine-btn-label" id="engineLabel">START RUN</span>
+      </button>
+    </footer>
+
+  </div>
+
+<script src="script.js"></script>
+</body>
+</html>
