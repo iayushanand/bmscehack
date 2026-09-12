@@ -44,17 +44,40 @@ body{
     radial-gradient(circle at 85% 100%, rgba(255,159,67,0.06), transparent 45%),
     repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 3px);
   display: flex;
+  align-items: center;
   justify-content: center;
+  padding: clamp(16px, 4vw, 48px) 16px;
 }
 
 .chassis{
   width: 100%;
   max-width: 460px;
-  min-height: 100vh;
-  padding: 18px 18px 28px;
+  margin: 0 auto;
+  padding: 22px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Tablet / desktop: present the deck as a symmetric, centered card
+   instead of a full-bleed mobile sheet */
+@media (min-width: 640px){
+  .chassis{
+    max-width: 440px;
+    padding: 30px;
+    border: 1px solid var(--panel-edge);
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent 30%);
+    box-shadow:
+      0 24px 70px rgba(0,0,0,0.55),
+      0 0 0 1px rgba(255,255,255,0.02) inset;
+  }
+}
+
+@media (min-width: 900px){
+  .chassis{ max-width: 480px; padding: 34px; gap: 18px; }
+  .gauge-wrap{ width: 240px; height: 240px; }
+  .gauge-value{ font-size: 56px; }
 }
 
 /* ===================== TOP BAR ===================== */
@@ -319,7 +342,6 @@ section, footer.engine-panel{
   flex-direction: column;
   gap: 12px;
   align-items: stretch;
-  margin-top: auto;
 }
 
 .engine-btn{
