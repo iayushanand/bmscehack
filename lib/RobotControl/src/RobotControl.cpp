@@ -8,12 +8,43 @@ RobotMode g_mode = RobotMode::MANUAL;
 uint8_t g_speed = 120U;
 uint8_t g_maxSpeed = 200U;
 uint8_t g_minSpeed = 0U;
+uint8_t g_ledPin = 2U; // ESP32 onboard LED
 
 void begin(RobotMode mode, uint8_t speed, uint8_t maxSpeed)
 {
   g_maxSpeed = maxSpeed;
   g_mode = mode;
   setSpeed(speed); // clamps
+  pinMode(g_ledPin, OUTPUT);
+  // initial LED state: MANUAL=ON, LINE_FOLLOWER=OFF (blink will handle)
+  digitalWrite(g_ledPin, (g_mode == RobotMode::MANUAL) ? HIGH : LOW);
+}
+
+void setLedPin(uint8_t pin)
+{
+  g_ledPin = pin;
+  pinMode(g_ledPin, OUTPUT);
+}
+
+void updateLed()
+{
+  if (isManual())
+  {
+    digitalWrite(g_ledPin, HIGH); // steady ON for manual
+  }
+  else
+  {
+    // LINE_FOLLOWER: 1 sec blink (1s ON / 1s OFF -> toggle every 1000ms)
+    static uint32_t lastToggleMs = 0;
+    static bool ledState = false;
+    uint32_t now = millis();
+    if (now - lastToggleMs >= 1000UL)
+    {
+      lastToggleMs = now;
+      ledState = !ledState;
+      digitalWrite(g_ledPin, ledState ? HIGH : LOW);
+    }
+  }
 }
 
 void setMode(RobotMode mode)
@@ -125,25 +156,23 @@ bool handleCommand(char c)
       return true;
     }
     case '+':
-    case 'U':
-    case 'u':
+    case 'Q':
+    case 'q':
+    case 'C':
+    case 'c': // Circle button = speed up, persistent
       changeSpeed(10);
       return true;
     case '-':
-    case 'D':
-    case 'd':
+    case 'E':
+    case 'e':
+      // NOTE: 'S'/Square NOT here - handled dual in RemoteControl:
+      // S while moving = STOP (D-pad release, speed kept), S while stopped = -10.
+      // This avoids D-pad release draining speed to 0.
       changeSpeed(-10);
       return true;
-    case '0': setSpeed(0); return true;
-    case '1': setSpeed(28); return true;
-    case '2': setSpeed(56); return true;
-    case '3': setSpeed(84); return true;
-    case '4': setSpeed(112); return true;
-    case '5': setSpeed(140); return true;
-    case '6': setSpeed(168); return true;
-    case '7': setSpeed(196); return true;
-    case '8': setSpeed(220); return true;
-    case '9': setSpeed(252); return true;
+    // NOTE: '0'..'9' presets REMOVED - gamepad sends trailing '0' after every
+    // button (e.g. 'C' + '0', 'S' + '0' in your log), which reset speed to 0.
+    // Use C/Q/+ and E/- for speed. Digits return false -> IGNORED.
     default:
       return false;
   }

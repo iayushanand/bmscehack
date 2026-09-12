@@ -35,9 +35,12 @@ namespace RobotControl
   extern uint8_t g_speed;    // 0..255 shared base speed
   extern uint8_t g_maxSpeed; // clamp upper, default 200
   extern uint8_t g_minSpeed; // clamp lower, default 0
+  extern uint8_t g_ledPin;   // onboard LED, default 2 (ESP32 dev)
 
   /** Init globals. Call from setup(). */
   void begin(RobotMode mode = RobotMode::MANUAL, uint8_t speed = 120U, uint8_t maxSpeed = 200U);
+  void setLedPin(uint8_t pin);
+  void updateLed(); // call in loop: MANUAL=ON, LINE_FOLLOWER=1s blink
 
   // ---- Mode API ----
   void setMode(RobotMode mode);
@@ -59,14 +62,16 @@ namespace RobotControl
 
   /**
    * @brief Handle single char command for mode/speed (returns true if handled).
-   * Supported:
+   * Gamepad-compatible (Arduino Bluetooth Controller: X=Cross, C=Circle, S=Square, T=Triangle):
    *   'A'/'a' -> LINE_FOLLOWER
    *   'M'/'m' -> MANUAL
-   *   'T'/'t' / 'X'/'x' -> toggle (X button on controller, debounced 400ms)
-   *   '+' / 'U'/'u' -> speed +10
-   *   '-' / 'D'/'d' -> speed -10
-   *   '0'..'9' -> speed = digit*28 (~0..252)
-   *   'S'/'s' -> stop handled elsewhere, but returns false here
+   *   'T'/'t' / 'X'/'x' -> toggle (X button on gamepad, debounced 400ms)
+   *   'C'/'c' / '+' / 'Q'/'q' -> speed +10 persistent (Circle = faster, instant)
+   *   '-' / 'E'/'e' -> speed -10 persistent (instant). 'S'/Square handled dual in
+   *     RemoteControl (S while moving = STOP keep speed, S while stopped = -10)
+   *     because D-pad release also sends 'S' - always-decrease would drain to 0.
+   *   Digits '0'..'9' IGNORED (gamepad sends trailing '0' after each button,
+   *     e.g. 'C'+'0' - treating it as preset reset speed to 0 every press).
    */
   bool handleCommand(char c);
 
