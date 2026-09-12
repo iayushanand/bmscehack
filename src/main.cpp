@@ -1,226 +1,173 @@
 #include <Arduino.h>
-#include "BluetoothSerial.h"
-
-// Check Bluetooth is enabled in SDK
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-#error Bluetooth is not enabled! Run `make menuconfig` to enable it
-#endif
+#include <BluetoothSerial.h>
+#include <stdint.h>
 
 /*
- * ESP32 + Smartphone Bluetooth -> DC Motor Control
- * ------------------------------------------------
- * Board: esp32dev (Arduino framework)
- * Bluetooth: Classic SPP (BluetoothSerial) - pairs like HC-05
- * Device name: "ESP32_Motor" - search this on your phone
- * App: "Serial Bluetooth Terminal" (Android) or any BT terminal
- *      iOS needs BLE - see note at bottom.
- *
- * Motor Driver Wiring (L298N / L293D / TB6612 / MX1508)
- * ------------------------------------------------------
- * ESP32 GPIO 27  -> IN1 / AIN1
- * ESP32 GPIO 26  -> IN2 / AIN2
- * ESP32 GPIO 14  -> ENA / PWMA (PWM speed, optional - jumpers if not used)
- * ESP32 GND      -> Driver GND (COMMON GND MANDATORY)
- * Driver VCC     -> 5V or battery (depending on driver)
- * Driver VM/VCC  -> Motor power supply (e.g. 6-12V for L298N)
- * Driver OUT1/OUT2 -> Motor terminals
- * Motor power GND -> ESP32 GND (common ground!)
- *
- * Commands (send single char from phone):
- *   F / f / 1 -> Forward
- *   B / b / 2 -> Backward
- *   S / s / 0 -> Stop (coast)
- *   X / x     -> Brake (short brake, both HIGH)
- *   3-9       -> Forward at different speed (3=low, 9=max)
- *   q,w,e...  -> Backward at different speed (if you want)
- *   V         -> Report status
- *
- * Adjust MOTOR_IN1 / MOTOR_IN2 / MOTOR_ENA to match your wiring.
+ * ESP32 + L298N dual BO motor control via Bluetooth Classic (SPP).
+ * Hold-to-run command protocol (send repeatedly while button is pressed):
+ *   'F' -> robot forward
+ *   'B' -> robot backward
+ *   'L' -> robot left
+ *   'R' -> robot right
+ *   'S' -> stop immediately
  */
 
-// ---------- Pin Config ----------
-#define LED_BUILTIN 2
-#define MOTOR_IN1 27
-#define MOTOR_IN2 26
-#define MOTOR_ENA 14   // PWM pin - set to -1 if you don't use ENA (jumper on L298N)
+/* Left motor (L298N channel A) */
+static constexpr uint8_t MOTOR_LEFT_IN1_PIN = 26U;
+static constexpr uint8_t MOTOR_LEFT_IN2_PIN = 27U;
+static constexpr uint8_t MOTOR_LEFT_EN_PIN = 25U;
 
-// PWM config for ENA
-#define PWM_CHANNEL 0
-#define PWM_FREQ 5000
-#define PWM_RESOLUTION 8 // 0-255
+/* Right motor (L298N channel B) */
+static constexpr uint8_t MOTOR_RIGHT_IN1_PIN = 14U;
+static constexpr uint8_t MOTOR_RIGHT_IN2_PIN = 12U;
+static constexpr uint8_t MOTOR_RIGHT_EN_PIN = 33U;
 
-// Speed
-static uint8_t currentSpeed = 200; // 0-255 default
+static constexpr uint8_t PWM_CH_LEFT = 0U;
+static constexpr uint8_t PWM_CH_RIGHT = 1U;
+static constexpr uint32_t PWM_FREQ_HZ = 1000UL;
+static constexpr uint8_t PWM_RES_BITS = 8U;
+static constexpr uint8_t MOTOR_SPEED_DUTY = 100U; /* 0..255 */
+static constexpr uint32_t COMMAND_HOLD_TIMEOUT_MS = 250UL;
 
-BluetoothSerial SerialBT;
-String deviceName = "ESP32_Motor";
+static const char *BT_DEVICE_NAME = "BURNT_TOASTER";
 
-// ---------- Motor Helpers ----------
-inline void pwmWriteENA(uint8_t val) {
-#if MOTOR_ENA != -1
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcWrite(MOTOR_ENA, val);
-#else
-  ledcWrite(PWM_CHANNEL, val);
-#endif
-#endif
+static BluetoothSerial g_btSerial;
+static volatile uint32_t g_lastMotionCommandMs = 0UL;
+
+static void setLeftMotor(const bool forward, const uint8_t duty)
+{
+  digitalWrite(MOTOR_LEFT_IN1_PIN, forward ? HIGH : LOW);
+  digitalWrite(MOTOR_LEFT_IN2_PIN, forward ? LOW : HIGH);
+  ledcWrite(PWM_CH_LEFT, duty);
 }
 
-void motorStop() {
-  pwmWriteENA(0);
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, LOW);
-  Serial.println("[MOTOR] STOP (coast)");
-  if (SerialBT.hasClient()) SerialBT.println("STOP");
+static void setRightMotor(const bool forward, const uint8_t duty)
+{
+  digitalWrite(MOTOR_RIGHT_IN1_PIN, forward ? HIGH : LOW);
+  digitalWrite(MOTOR_RIGHT_IN2_PIN, forward ? LOW : HIGH);
+  ledcWrite(PWM_CH_RIGHT, duty);
 }
 
-void motorBrake() {
-  pwmWriteENA(255);
-  digitalWrite(MOTOR_IN1, HIGH);
-  digitalWrite(MOTOR_IN2, HIGH);
-  Serial.println("[MOTOR] BRAKE");
-  if (SerialBT.hasClient()) SerialBT.println("BRAKE");
+static void robotStop(void)
+{
+  digitalWrite(MOTOR_LEFT_IN1_PIN, LOW);
+  digitalWrite(MOTOR_LEFT_IN2_PIN, LOW);
+  digitalWrite(MOTOR_RIGHT_IN1_PIN, LOW);
+  digitalWrite(MOTOR_RIGHT_IN2_PIN, LOW);
+  ledcWrite(PWM_CH_LEFT, 0U);
+  ledcWrite(PWM_CH_RIGHT, 0U);
 }
 
-void motorForward(uint8_t speed = 255) {
-  currentSpeed = speed;
-  digitalWrite(MOTOR_IN1, HIGH);
-  digitalWrite(MOTOR_IN2, LOW);
-  pwmWriteENA(speed);
-  Serial.printf("[MOTOR] FORWARD speed=%d\n", speed);
-  if (SerialBT.hasClient()) SerialBT.printf("FORWARD %d\n", speed);
+static void robotForward(void)
+{
+  setLeftMotor(true, MOTOR_SPEED_DUTY);
+  setRightMotor(true, MOTOR_SPEED_DUTY);
 }
 
-void motorBackward(uint8_t speed = 255) {
-  currentSpeed = speed;
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, HIGH);
-  pwmWriteENA(speed);
-  Serial.printf("[MOTOR] BACKWARD speed=%d\n", speed);
-  if (SerialBT.hasClient()) SerialBT.printf("BACKWARD %d\n", speed);
+static void robotBackward(void)
+{
+  setLeftMotor(false, MOTOR_SPEED_DUTY);
+  setRightMotor(false, MOTOR_SPEED_DUTY);
 }
 
-void handleCommand(char cmd) {
-  // trim whitespace already
-  switch (cmd) {
+static void robotLeft(void)
+{
+  /* Pivot left: left wheel backward, right wheel forward */
+  setLeftMotor(false, MOTOR_SPEED_DUTY);
+  setRightMotor(true, MOTOR_SPEED_DUTY);
+}
+
+static void robotRight(void)
+{
+  /* Pivot right: left wheel forward, right wheel backward */
+  setLeftMotor(true, MOTOR_SPEED_DUTY);
+  setRightMotor(false, MOTOR_SPEED_DUTY);
+}
+
+static void handleCommand(const char command)
+{
+  switch (command)
+  {
     case 'F':
     case 'f':
-    case '1':
-      motorForward(currentSpeed);
+      robotForward();
+      g_lastMotionCommandMs = millis();
       break;
+
     case 'B':
     case 'b':
-    case '2':
-      motorBackward(currentSpeed);
+      robotBackward();
+      g_lastMotionCommandMs = millis();
       break;
+
+    case 'L':
+    case 'l':
+      robotLeft();
+      g_lastMotionCommandMs = millis();
+      break;
+
+    case 'R':
+    case 'r':
+      robotRight();
+      g_lastMotionCommandMs = millis();
+      break;
+
     case 'S':
     case 's':
-    case '0':
-      motorStop();
+      robotStop();
+      g_lastMotionCommandMs = 0UL;
       break;
-    case 'X':
-    case 'x':
-      motorBrake();
-      break;
-    // numeric speed control 3-9 for forward
-    case '3': motorForward(80); break;
-    case '4': motorForward(120); break;
-    case '5': motorForward(160); break;
-    case '6': motorForward(200); break;
-    case '7': motorForward(220); break;
-    case '8': motorForward(240); break;
-    case '9': motorForward(255); break;
-    case 'V':
-    case 'v':
-      Serial.printf("Status: IN1=%d IN2=%d Speed=%d\n",
-                    digitalRead(MOTOR_IN1), digitalRead(MOTOR_IN2), currentSpeed);
-      if (SerialBT.hasClient()) SerialBT.printf("IN1=%d IN2=%d Speed=%d\n",
-                    digitalRead(MOTOR_IN1), digitalRead(MOTOR_IN2), currentSpeed);
-      break;
+
     default:
-      Serial.printf("[BT] Unknown cmd: '%c' (%d)\n", cmd, cmd);
-      if (SerialBT.hasClient()) SerialBT.printf("Unknown: %c - Use F/B/S/X or 3-9\n", cmd);
+      /* Ignore unsupported commands */
       break;
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(500);
-  Serial.println("\n--- ESP32 Bluetooth Motor Control ---");
+void setup()
+{
+  pinMode(MOTOR_LEFT_IN1_PIN, OUTPUT);
+  pinMode(MOTOR_LEFT_IN2_PIN, OUTPUT);
+  pinMode(MOTOR_LEFT_EN_PIN, OUTPUT);
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
+  pinMode(MOTOR_RIGHT_IN1_PIN, OUTPUT);
+  pinMode(MOTOR_RIGHT_IN2_PIN, OUTPUT);
+  pinMode(MOTOR_RIGHT_EN_PIN, OUTPUT);
 
-  pinMode(MOTOR_IN1, OUTPUT);
-  pinMode(MOTOR_IN2, OUTPUT);
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, LOW);
+  ledcSetup(PWM_CH_LEFT, PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcSetup(PWM_CH_RIGHT, PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcAttachPin(MOTOR_LEFT_EN_PIN, PWM_CH_LEFT);
+  ledcAttachPin(MOTOR_RIGHT_EN_PIN, PWM_CH_RIGHT);
 
-#if MOTOR_ENA != -1
-  pinMode(MOTOR_ENA, OUTPUT);
-  // Arduino-ESP32 v2.x vs v3.x LEDC API handling
-  // Try new API first (ledcAttach), fallback to old (ledcSetup/ledcAttachPin)
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcAttach(MOTOR_ENA, PWM_FREQ, PWM_RESOLUTION);
-#else
-  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttachPin(MOTOR_ENA, PWM_CHANNEL);
-#endif
-  pwmWriteENA(0);
-#endif
+  robotStop();
 
-  // Start Bluetooth Classic
-  if (!SerialBT.begin(deviceName)) {
-    Serial.println("ERROR: Bluetooth init failed! Check CONFIG_BT_ENABLED");
-    while (1) {
-      digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-      delay(200);
+  (void)g_btSerial.begin(BT_DEVICE_NAME);
+  g_btSerial.println("Bluetooth dual-motor hold-to-run ready");
+  g_btSerial.println("Hold F/B/L/R. Release to auto-stop.");
+  g_btSerial.println("Send S to stop immediately.");
+
+  g_lastMotionCommandMs = 0UL;
+}
+
+void loop()
+{
+  while (g_btSerial.available() > 0)
+  {
+    const char cmd = static_cast<char>(g_btSerial.read());
+    handleCommand(cmd);
+  }
+
+  if (g_lastMotionCommandMs > 0UL)
+  {
+    const uint32_t nowMs = millis();
+    const uint32_t elapsedMs = nowMs - g_lastMotionCommandMs;
+
+    if (elapsedMs > COMMAND_HOLD_TIMEOUT_MS)
+    {
+      robotStop();
+      g_lastMotionCommandMs = 0UL;
     }
   }
-  Serial.printf("Bluetooth Started! Pair with \"%s\" on your phone\n", deviceName.c_str());
-  Serial.println("Commands: F=Forward B=Backward S=Stop X=Brake 3..9=Speed V=Status");
-  SerialBT.println("ESP32 Motor Ready. Send F/B/S");
+
+  delay(10U);
 }
-
-void loop() {
-  // --- Bluetooth -> Motor ---
-  if (SerialBT.available()) {
-    char c = SerialBT.read();
-    // ignore newline/carriage return but process buffer
-    if (c == '\n' || c == '\r' || c == ' ') return;
-    Serial.printf("[BT RX] %c\n", c);
-    handleCommand(c);
-  }
-
-  // --- USB Serial -> Bluetooth (for testing from Serial Monitor) ---
-  if (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n' || c == '\r' || c == ' ') return;
-    Serial.printf("[USB RX] %c -> BT\n", c);
-    handleCommand(c); // also control locally
-    if (SerialBT.hasClient()) SerialBT.printf("Echo: %c\n", c);
-  }
-
-  // LED indicates Bluetooth connection status
-  static uint32_t lastBlink = 0;
-  static bool ledState = false;
-  uint32_t interval = SerialBT.hasClient() ? 1000 : 200; // fast blink = waiting, slow = connected
-  if (millis() - lastBlink > interval) {
-    lastBlink = millis();
-    ledState = !ledState;
-    digitalWrite(LED_BUILTIN, ledState);
-  }
-}
-
-/*
- * iOS NOTE:
- * iPhone does NOT support Bluetooth Classic SPP. For iOS use BLE:
- * Replace BluetoothSerial with NimBLE (Arduino BLE) and create a service
- * with a writable characteristic. Apps like "nRF Connect" or "LightBlue"
- * can then send F/B/S. Let me know if you need the BLE version.
- *
- * L298N without ENA jumper:
- * If your L298N has ENA jumper cap ON, you don't need MOTOR_ENA wiring
- * and motor will run at full speed. Set MOTOR_ENA to -1 or remove PWM code.
- */
