@@ -1,4 +1,5 @@
 #include "LineFollower.h"
+#include "RobotControl.h"
 
 // ---------- Config defaults ----------
 LineFollower::Config::Config()
@@ -78,6 +79,13 @@ void LineFollower::begin(bool initMotors)
     ledcAttachPin(m_config.pinLeftEn, m_config.pwmChannelLeft);
     ledcAttachPin(m_config.pinRightEn, m_config.pwmChannelRight);
     stop();
+  }
+
+  // Sync with global speed if RobotControl already inited
+  m_config.baseSpeed = RobotControl::getSpeed();
+  if (m_config.maxSpeed > RobotControl::getMaxSpeed())
+  {
+    m_config.maxSpeed = RobotControl::getMaxSpeed();
   }
 
   m_lastPidMs = millis();
@@ -307,6 +315,12 @@ void LineFollower::update()
 {
   if (!m_initialized) return;
 
+  // Sync global speed (single source of truth)
+  if (m_config.baseSpeed != RobotControl::getSpeed())
+  {
+    m_config.baseSpeed = RobotControl::getSpeed();
+  }
+
   readSensors();
 
   if (m_config.debug)
@@ -363,6 +377,7 @@ void LineFollower::update()
 void LineFollower::setBaseSpeed(uint8_t speed)
 {
   m_config.baseSpeed = speed;
+  RobotControl::setSpeed(speed);
 }
 
 void LineFollower::setPID(float kp, float ki, float kd)

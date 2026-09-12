@@ -1,73 +1,93 @@
 #include <Arduino.h>
+#include <RobotControl.h>
 #include <RemoteControl.h>
 #include <LineFollower.h>
 
-// ---------- Select mode ----------
-// Manual = Bluetooth remote (hold F/B/L/R/S)
-// Auto   = IR line follower (PID path correction)
-// Switch via Bluetooth: send 'A' for AUTO, 'M' for MANUAL
-enum class Mode : uint8_t { MANUAL, AUTO };
-
+// Global instances - motors share same L298N pins/channels (26/27/25/14/12/33, ch 0/1)
+// RobotControl holds single source of truth: g_mode + g_speed
 static RemoteControl g_remoteControl;
-static LineFollower g_lineFollower; // uses IR pins 36,39,34,35,32 by default
-static Mode g_mode = Mode::MANUAL;
-
-// Optional: uncomment to auto-calibrate IR threshold at boot
-// static bool g_doCalibrate = true;
+static LineFollower g_lineFollower;
 
 void setup()
 {
   Serial.begin(115200);
-  // Init motors once via RemoteControl; LineFollower reuses same L298N pins/channels
-  g_remoteControl.begin();
-  g_lineFollower.begin(false); // false = don't re-init motors (already inited)
 
-  // Example custom tuning:
-  // LineFollower::Config cfg;
-  // cfg.baseSpeed = 130;
-  // cfg.kp = 0.09f; cfg.ki = 0.0f; cfg.kd = 0.18f;
-  // cfg.analogThreshold = 2000;
-  // g_lineFollower = LineFollower(cfg);
+  // Init global state: MANUAL + shared speed (syncs to both subsystems)
+  RobotControl::begin(RobotMode::MANUAL, 120U, 200U);
 
-  // g_lineFollower.calibrate(); // place robot on line/white and auto-find threshold
+  // Init motors once via RemoteControl; LineFollower reuses same pins
+  g_remoteControl.begin();      // syncs motorSpeedDuty from RobotControl::g_speed
+  g_lineFollower.begin(false);  // false = don't re-init motors, syncs baseSpeed from global
 
-  Serial.println("Ready: MANUAL (Bluetooth F/B/L/R/S). Send 'A' for AUTO line follow, 'M' for manual.");
+  Serial.println("=== LineFollower + Remote ===");
+  RobotControl::printState(Serial);
+  Serial.println("Commands (USB Serial OR Bluetooth):");
+  Serial.println("  X/x or T/t -> TOGGLE mode (X button on controller)");
+  Serial.println("  A/a -> LINE_FOLLOWER, M/m -> MANUAL");
+  Serial.println("  +/- (or U/D) -> speed +/-10, 0..9 -> preset speed");
+  Serial.println("  F/B/L/R/S -> manual motion (hold-to-run, auto-stop 250ms)");
+  Serial.println("  P -> print IR sensors");
 }
 
 void loop()
 {
-  // Allow mode switching via same BluetoothSerial inside RemoteControl?
-  // RemoteControl doesn't expose raw BT, so we handle switch via Serial for demo.
-  // For Bluetooth switch, add a method to RemoteControl or duplicate BT here.
-  // Simple demo: use USB Serial to switch modes.
-  if (Serial.available() > 0)
+  // ---- Handle USB Serial for global mode/speed (also works via BT through RemoteControl) ----
+  while (Serial.available() > 0)
   {
     char c = (char)Serial.read();
-    if (c == 'A' || c == 'a')
-    {
-      g_mode = Mode::AUTO;
-      Serial.println("-> AUTO line follower");
-    }
-    else if (c == 'M' || c == 'm')
-    {
-      g_mode = Mode::MANUAL;
-      g_lineFollower.stop();
-      Serial.println("-> MANUAL remote");
-    }
-    // also allow manual line debug
-    if (c == 'p' || c == 'P')
+    if (c == 'P' || c == 'p')
     {
       g_lineFollower.printSensors(Serial);
+      RobotControl::printState(Serial);
+      g_remoteControl.printBTInfo(Serial);
+      continue;
+    }
+    // Try global handle first
+    bool wasGlobal = RobotControl::handleCommand(c);
+    if (wasGlobal)
+    {
+      // Propagate global speed to both libs (they also auto-sync, but force now)
+      g_remoteControl.setSpeed(RobotControl::getSpeed());
+      g_lineFollower.setBaseSpeed(RobotControl::getSpeed());
+
+      Serial.print("-> ");
+      RobotControl::printState(Serial);
+
+      // Safety stop on mode switch
+      if (RobotControl::isManual())
+      {
+        g_lineFollower.stop();
+      }
+      else
+      {
+        g_remoteControl.stop();
+      }
+      continue;
+    }
+    // Otherwise forward to RemoteControl motion if in MANUAL
+    if (RobotControl::isManual())
+    {
+      g_remoteControl.handleCommand(c);
     }
   }
 
-  if (g_mode == Mode::AUTO)
+  // ---- Run active mode ----
+  if (RobotControl::isLineFollower())
   {
-    g_lineFollower.update(); // IR detect + PID correct path
+    g_lineFollower.update(); // IR detect + PID correction; auto-syncs speed from global
   }
   else
   {
-    g_remoteControl.update(); // Bluetooth hold-to-run
+    // In MANUAL, RemoteControl handles BT internally (including A/M/+/- mode/speed switches)
+    // which already sync g_speed and stop on mode change.
+    g_remoteControl.update();
+
+    // Detect mode switch that happened via Bluetooth inside RemoteControl::handleCommand
+    // If switched to LINE_FOLLOWER via BT, stop remote immediately
+    if (RobotControl::isLineFollower())
+    {
+      g_remoteControl.stop();
+    }
   }
 
   delay(10U);

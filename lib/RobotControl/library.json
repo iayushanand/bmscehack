@@ -1,0 +1,9 @@
+{
+  "name": "RobotControl",
+  "version": "1.0.0",
+  "description": "Global robot mode (MANUAL / LINE_FOLLOWER) and shared speed variable - single source of truth for RemoteControl and LineFollower",
+  "keywords": "robot, mode, speed, line follower, manual",
+  "authors": { "name": "LineFollower", "maintainer": true },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

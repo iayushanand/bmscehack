@@ -77,7 +77,14 @@ public:
   void right();
 
   void setSpeed(uint8_t duty);
+  uint8_t getSpeed() const { return m_config.motorSpeedDuty; }
   bool isBluetoothConnected();
+
+  // Bluetooth passthrough for RobotControl mode/speed handling
+  bool btAvailable();
+  int btRead();
+  Stream &getBTStream();
+  void printBTInfo(Stream &out = Serial);
 
 private:
   void setLeftMotor(bool forward, uint8_t duty);

@@ -1,4 +1,5 @@
 #include "RemoteControl.h"
+#include "RobotControl.h"
 
 RemoteControl::RemoteControl(const Config &config)
     : m_config(config)
@@ -24,6 +25,9 @@ void RemoteControl::begin()
   ledcSetup(m_config.pwmChannelRight, m_config.pwmFreqHz, m_config.pwmResolutionBits);
   ledcAttachPin(m_config.pinLeftEn, m_config.pwmChannelLeft);
   ledcAttachPin(m_config.pinRightEn, m_config.pwmChannelRight);
+
+  // Sync with global speed
+  m_config.motorSpeedDuty = RobotControl::getSpeed();
 
   stop();
 
@@ -65,28 +69,58 @@ void RemoteControl::update()
 
 void RemoteControl::handleCommand(const char command)
 {
+  // Intercept global mode/speed commands first (A/M/T/X/+/- etc)
+  RobotMode before = RobotControl::getMode();
+  if (RobotControl::handleCommand(command))
+  {
+    // Sync local speed from global after change
+    m_config.motorSpeedDuty = RobotControl::getSpeed();
+    RobotMode after = RobotControl::getMode();
+    if (before != after)
+    {
+      // Mode toggled via X/T/A/M - give feedback on BT + Serial
+      stop();
+      m_lastMotionCommandMs = 0UL;
+      m_btSerial.print("MODE -> ");
+      m_btSerial.println(RobotControl::modeToString(after));
+      Serial.print("[Remote] X toggle -> ");
+      Serial.println(RobotControl::modeToString(after));
+    }
+    else if (command == '+' || command == '-' || command == 'U' || command == 'u' || command == 'D' || command == 'd' || (command >= '0' && command <= '9'))
+    {
+      m_btSerial.print("SPEED -> ");
+      m_btSerial.println(RobotControl::getSpeed());
+    }
+    return;
+  }
+
   switch (command)
   {
     case 'F':
     case 'f':
+      // Keep speed in sync with global (allows runtime speed changes)
+      m_config.motorSpeedDuty = RobotControl::getSpeed();
       forward();
       m_lastMotionCommandMs = millis();
       break;
 
     case 'B':
     case 'b':
+      m_config.motorSpeedDuty = RobotControl::getSpeed();
       backward();
       m_lastMotionCommandMs = millis();
       break;
 
     case 'L':
     case 'l':
+      m_config.motorSpeedDuty = RobotControl::getSpeed();
       left();
       m_lastMotionCommandMs = millis();
       break;
 
     case 'R':
     case 'r':
+      m_config.motorSpeedDuty = RobotControl::getSpeed();
       right();
       m_lastMotionCommandMs = millis();
       break;
@@ -142,6 +176,32 @@ void RemoteControl::right()
 void RemoteControl::setSpeed(uint8_t duty)
 {
   m_config.motorSpeedDuty = duty;
+  // Keep global in sync if called externally
+  RobotControl::setSpeed(duty);
+}
+
+bool RemoteControl::btAvailable()
+{
+  return m_btSerial.available() > 0;
+}
+
+int RemoteControl::btRead()
+{
+  return m_btSerial.read();
+}
+
+Stream &RemoteControl::getBTStream()
+{
+  return m_btSerial;
+}
+
+void RemoteControl::printBTInfo(Stream &out)
+{
+  out.print("BT ");
+  out.print(m_config.btDeviceName);
+  out.print(m_btSerial.hasClient() ? " connected" : " idle");
+  out.print(" speed=");
+  out.println(m_config.motorSpeedDuty);
 }
 
 bool RemoteControl::isBluetoothConnected()
