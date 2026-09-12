@@ -1,9 +1,9 @@
 #include "LineFollower.h"
 #include "RobotControl.h"
 
-// ---------- Config defaults ----------
+// ---------- Config defaults: 2-sensor black line, straight 100 / pivot 80 (controller-adjustable) ----------
 LineFollower::Config::Config()
-    : numSensors(5U),
+    : numSensors(2U),
       pinLeftIn1(26U),
       pinLeftIn2(27U),
       pinLeftEn(25U),
@@ -14,26 +14,28 @@ LineFollower::Config::Config()
       pwmChannelRight(1U),
       pwmFreqHz(1000UL),
       pwmResolutionBits(8U),
-      baseSpeed(120U),
-      maxSpeed(200U),
+      baseSpeed(100U),
+      turnSpeed(80U), // slow pivot turns (both wheels opposite)
+      maxSpeed(150U),
       minSpeed(0U),
-      invertSensorLogic(false),
+      invertSensorLogic(false), // analog HIGH = black = line (value > th = line)
       analogSensors(true),
       analogThreshold(2000U),
       lineIsBlack(true),
-      kp(0.08f),
+      kp(0.12f),
       ki(0.0f),
-      kd(0.15f),
+      kd(0.18f),
       sampleTimeMs(10U),
-      debug(false)
+      autoBurstMs(10UL),
+      debug(true) // stream IR values every update (Serial 115200)
 {
-  // Default 5 sensors left->right on ADC1 pins (avoid strapping pins)
-  sensorPins[0] = 36U; // VP
-  sensorPins[1] = 39U; // VN
-  sensorPins[2] = 34U;
-  sensorPins[3] = 35U;
-  sensorPins[4] = 32U;
-  sensorPins[5] = 33U; // unused for 5 sensors (33 is motor EN, keep spare)
+  // 2 sensors left->right on ADC1 input-only pins (avoid strapping + motor pins)
+  sensorPins[0] = 4U; // VP = LEFT
+  sensorPins[1] = 15U; // VN = RIGHT
+  sensorPins[2] = 34U; // spare
+  sensorPins[3] = 35U; // spare
+  sensorPins[4] = 32U; // spare
+  sensorPins[5] = 33U; // unused (33 is motor EN)
 }
 
 // ---------- Ctor ----------
@@ -81,13 +83,8 @@ void LineFollower::begin(bool initMotors)
     stop();
   }
 
-  // Sync with global speed if RobotControl already inited
+  // Line speeds follow the shared controller global (Circle/Square adjust live).
   m_config.baseSpeed = RobotControl::getSpeed();
-  if (m_config.maxSpeed > RobotControl::getMaxSpeed())
-  {
-    m_config.maxSpeed = RobotControl::getMaxSpeed();
-  }
-
   m_lastPidMs = millis();
   m_initialized = true;
 
@@ -221,7 +218,19 @@ void LineFollower::printSensors(Stream &out) const
   out.print("Sensors [L->R]: ");
   for (uint8_t i = 0; i < m_config.numSensors; i++)
   {
-    out.print(m_config.analogSensors ? m_sensorValues[i] : (m_digitalValues[i] ? 1 : 0));
+    if (m_config.analogSensors)
+    {
+      // Show analog value + live digital level (D) to distinguish AO vs DO wiring issues
+      int d = digitalRead(m_config.sensorPins[i]);
+      out.print(m_sensorValues[i]);
+      out.print("(D");
+      out.print(d);
+      out.print(")");
+    }
+    else
+    {
+      out.print(m_digitalValues[i] ? 1 : 0);
+    }
     out.print(i < m_config.numSensors - 1 ? " | " : "");
   }
   out.print("  pos=");
@@ -230,9 +239,24 @@ void LineFollower::printSensors(Stream &out) const
   out.println();
 }
 
-// Weighted position: -2000..+2000 for 5 sensors, scaled for 3 sensors similarly
+// Weighted position: -2000..+2000 for 5 sensors, +/-1000 for 2 sensors
 int16_t LineFollower::computePosition()
 {
+  // ---- Dedicated 2-sensor black-line logic ----
+  // L = sensorPins[0], R = sensorPins[1], onLine = black (HIGH after invert fix).
+  // Both black (intersection / wide line) -> forward, not lost.
+  // Both white (all white, line lost) -> LOST, caller stops motors.
+  if (m_config.numSensors == 2U)
+  {
+    bool L = m_digitalValues[0];
+    bool R = m_digitalValues[1];
+    if (L && !R) { m_lineLost = false; return -1000; } // line under left -> turn left
+    if (!L && R) { m_lineLost = false; return 1000; }  // line under right -> turn right
+    if (L && R) { m_lineLost = false; return 0; }      // intersection -> straight
+    m_lineLost = true; // all white -> stop
+    return m_lastPosition;
+  }
+
   uint8_t active = 0U;
   int32_t weightedSum = 0;
   int32_t sum = 0;
@@ -311,14 +335,60 @@ int16_t LineFollower::pidCompute(int16_t error)
   return (int16_t)out;
 }
 
+void LineFollower::startAuto()
+{
+  if (!m_initialized) return;
+  m_burstActive = true;
+  m_burstStartMs = millis();
+  m_config.baseSpeed = RobotControl::getSpeed(); // live controller speed
+  forward(m_config.baseSpeed);
+  if (m_config.debug)
+  {
+    Serial.print("[LineFollower] burst ");
+    Serial.print(m_config.autoBurstMs);
+    Serial.print("ms at ");
+    Serial.println(m_config.baseSpeed);
+  }
+}
+
+void LineFollower::cancelAuto()
+{
+  if (m_burstActive)
+  {
+    m_burstActive = false;
+    stop();
+  }
+}
+
 void LineFollower::update()
 {
   if (!m_initialized) return;
 
-  // Sync global speed (single source of truth)
+  // Controller-adjustable: straight speed follows shared global live.
+  // Turn speed scales with it (turnScale = turnSpeed/baseSpeed from config).
   if (m_config.baseSpeed != RobotControl::getSpeed())
   {
-    m_config.baseSpeed = RobotControl::getSpeed();
+    uint8_t g = RobotControl::getSpeed();
+    // Keep turn proportional to straight (default 80/100), scaled by controller speed
+    m_config.turnSpeed = (uint8_t)((uint16_t)g * 80U / 100U);
+    m_config.baseSpeed = g;
+  }
+
+  // AUTO-entry forward burst owned by this lib, fixed baseSpeed
+  if (m_burstActive)
+  {
+    uint32_t elapsed = millis() - m_burstStartMs;
+    if (elapsed < m_config.autoBurstMs)
+    {
+      forward(m_config.baseSpeed);
+      return; // pure forward during burst, skip PID
+    }
+    m_burstActive = false;
+    stop();
+    if (m_config.debug)
+    {
+      Serial.println("[LineFollower] burst done, PID starts");
+    }
   }
 
   readSensors();
@@ -326,9 +396,46 @@ void LineFollower::update()
   if (m_config.debug)
   {
     printSensors(Serial);
+    // Stuck-at-0 diagnostic: both channels near GND = wiring/power fault, not a line issue.
+    // Throttled to one hint every ~2s so the value stream stays readable.
+    if (m_config.numSensors == 2U && m_sensorValues[0] < 50U && m_sensorValues[1] < 50U)
+    {
+      static uint32_t s_lastWarnMs = 0;
+      uint32_t now = millis();
+      if (now - s_lastWarnMs > 2000UL)
+      {
+        s_lastWarnMs = now;
+        Serial.println("[LineFollower] WARN both IR ~0: check VCC/GND, AO (not DO) to 36/39, common GND, 3V3 vs 5V module supply.");
+      }
+    }
   }
 
   int16_t pos = getPosition();
+
+  // 2-sensor fixed-speed drive (straight 80, pivot turns slow at turnSpeed).
+  // Turns spin BOTH wheels opposite (pivot) instead of stopping one wheel.
+  // Independent of controller speed adjuster. All white -> stop.
+  if (m_config.numSensors == 2U)
+  {
+    if (isLineLost())
+    {
+      stop(); // all white: line lost, halt (values still stream via debug print above)
+      return;
+    }
+    if (pos == 0)
+    {
+      drive(m_config.baseSpeed, m_config.baseSpeed);
+    }
+    else if (pos < 0)
+    {
+      drive(-(int16_t)m_config.turnSpeed, m_config.turnSpeed); // pivot left, slow
+    }
+    else
+    {
+      drive(m_config.turnSpeed, -(int16_t)m_config.turnSpeed); // pivot right, slow
+    }
+    return;
+  }
 
   if (isLineLost())
   {
@@ -377,7 +484,12 @@ void LineFollower::update()
 void LineFollower::setBaseSpeed(uint8_t speed)
 {
   m_config.baseSpeed = speed;
-  RobotControl::setSpeed(speed);
+  RobotControl::setSpeed(speed); // keep shared global in sync (controller speed)
+}
+
+void LineFollower::setTurnSpeed(uint8_t speed)
+{
+  m_config.turnSpeed = speed;
 }
 
 void LineFollower::setPID(float kp, float ki, float kd)
@@ -390,6 +502,7 @@ void LineFollower::setPID(float kp, float ki, float kd)
 // ---------- Motors ----------
 void LineFollower::stop()
 {
+  m_burstActive = false;
   digitalWrite(m_config.pinLeftIn1, LOW);
   digitalWrite(m_config.pinLeftIn2, LOW);
   digitalWrite(m_config.pinRightIn1, LOW);

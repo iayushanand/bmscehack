@@ -6,16 +6,26 @@
 /**
  * @brief IR line detection + PID path correction for ESP32 + L298N.
  *
- * Supports 3 or 5 channel IR array (analog or digital). Default 5 sensors:
- *   pins {36, 39, 34, 35, 32} left -> right (ADC1, no conflict with RemoteControl motors 26/27/25/14/12/33)
+ * Default: 2-sensor black-line follower, controller-adjustable speeds:
+ *   pins {36 (left), 39 (right)} (ADC1, no conflict with motors 26/27/25/14/12/33)
+ *   analog + threshold 2000, HIGH = black = line (no invert)
+ *   straight 100 / pivot 80 defaults, Circle(+10)/Square(-10) adjust live (shared global).
+ *   baseSpeed 80 straight, turnSpeed 100 on turns.
  *
- * Line position is weighted average: [-2000 .. +2000] for 5 sensors (0 = centered).
- * PID correction drives differential motors: left = base - correction, right = base + correction.
+ * 2-sensor logic (black line HIGH, values stream on Serial):
+ *   L+R on line (both black) -> forward base/base (intersection)
+ *   neither on line (both white = all white) -> STOP motors (line lost)
+ *   left only -> slow pivot left: wheels opposite at turnSpeed
+ *   right only -> slow pivot right: wheels opposite at turnSpeed
+ * 5/3-sensor mode still uses PID: left = base - correction, right = base + correction.
+ *
+ * AUTO entry: call startAuto() on MANUAL->LINE_FOLLOWER switch. update() drives a
+ * short forward burst (autoBurstMs, default 10ms) then PID.
  *
  * Usage:
- *   LineFollower lf;
- *   lf.begin();
- *   lf.calibrate(); // optional auto-threshold
+ *   LineFollower lf; // 2 sensors, black line, straight 100 / pivot 80, controller-adjustable
+ *   lf.begin(false); // false = motors already inited by RemoteControl
+ *   onModeSwitchToAuto { lf.startAuto(); }
  *   loop { lf.update(); }
  *
  * Coexists with RemoteControl lib (shares same L298N pins/channels 0,1).
@@ -45,8 +55,9 @@ public:
     uint32_t pwmFreqHz;
     uint8_t pwmResolutionBits;
 
-    // Behavior
-    uint8_t baseSpeed;      // 0..255 forward PWM when centered
+    // Behavior (follows shared controller global; Circle/Square adjust live)
+    uint8_t baseSpeed;      // 0..255 forward PWM when centered (default 100)
+    uint8_t turnSpeed;      // 0..255 pivot speed, 2-sensor mode, both wheels opposite (default 80)
     uint8_t maxSpeed;       // clamp
     uint8_t minSpeed;       // minimum to overcome friction (applied as 0 or >=min)
     bool invertSensorLogic; // false: HIGH/dark = line (digital), or analog > threshold = line
@@ -58,6 +69,7 @@ public:
     float ki;
     float kd;
     uint16_t sampleTimeMs; // PID update interval
+    uint32_t autoBurstMs;  // forward nudge on startAuto() before PID (default 10ms)
     bool debug;
 
     Config();
@@ -85,10 +97,15 @@ public:
   void printSensors(Stream &out) const;
 
   // ---- Control API ----
-  void update(); // readSensors + PID + drive (call every loop)
-  void setBaseSpeed(uint8_t speed);
+  void update(); // burst (if active) else readSensors + PID + drive (call every loop)
+  void startAuto();  // begin AUTO: short forward burst at global speed, then PID
+  void cancelAuto(); // abort burst (e.g. toggled back to MANUAL mid-burst)
+  bool isBurstActive() const { return m_burstActive; }
+  void setBaseSpeed(uint8_t speed); // syncs shared controller global
+  void setTurnSpeed(uint8_t speed); // pivot speed, 2-sensor mode
   void setPID(float kp, float ki, float kd);
   void setThreshold(uint16_t th) { m_config.analogThreshold = th; }
+  void setAutoBurstMs(uint32_t ms) { m_config.autoBurstMs = ms; }
 
   // Motor primitives (same as RemoteControl)
   void stop();
@@ -113,4 +130,8 @@ private:
   float m_lastError = 0.0f;
   uint32_t m_lastPidMs = 0U;
   bool m_initialized = false;
+
+  // AUTO-entry forward burst state (owned by this lib, not main.cpp)
+  bool m_burstActive = false;
+  uint32_t m_burstStartMs = 0U;
 };
