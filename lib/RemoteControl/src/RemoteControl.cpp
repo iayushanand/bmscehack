@@ -26,7 +26,6 @@ void RemoteControl::begin()
   ledcAttachPin(m_config.pinLeftEn, m_config.pwmChannelLeft);
   ledcAttachPin(m_config.pinRightEn, m_config.pwmChannelRight);
 
-  // Sync with global speed
   m_config.motorSpeedDuty = RobotControl::getSpeed();
 
   stop();
@@ -52,7 +51,7 @@ void RemoteControl::update()
   while (m_btSerial.available() > 0)
   {
     const char cmd = static_cast<char>(m_btSerial.read());
-    // --- Print raw BT input to Serial Monitor ---
+
     Serial.print("[BT] RX: '");
     Serial.print(cmd);
     Serial.print("' (0x");
@@ -61,19 +60,15 @@ void RemoteControl::update()
     Serial.print(RobotControl::modeToString());
     Serial.print(" speed=");
     Serial.println(RobotControl::getSpeed());
-    // Gamepad joystick packets from Arduino Bluetooth Controller may be like "X:50 Y:60"
-    // Basic char mode handles F/B/L/R etc; joystick strings are ignored char-by-char but
-    // we keep raw char handling for button mode. For true analog, parse below if needed.
-    // If buffer contains ':' assume joystick packet -> parse whole line
+
     if (cmd == 'X' || cmd == 'x' || cmd == 'Y' || cmd == 'y')
     {
-      // Peek if this is X: / Y: joystick packet - read rest of line
-      // Check if next char is ':' without consuming if not
+
       if (m_btSerial.available() > 0 && m_btSerial.peek() == ':')
       {
         String line;
         line += cmd;
-        // read the rest until newline or timeout
+
         uint32_t t0 = millis();
         while (m_btSerial.available() > 0 && millis() - t0 < 20)
         {
@@ -81,7 +76,7 @@ void RemoteControl::update()
           line += c2;
           if (c2 == '\n') break;
         }
-        // try parse X:n Y:n  e.g. "X:50 Y:-80" or "X:50,Y:-80"
+
         int xVal = 0, yVal = 0;
         int xi = line.indexOf('X');
         if (xi < 0) xi = line.indexOf('x');
@@ -89,14 +84,14 @@ void RemoteControl::update()
         if (yi < 0) yi = line.indexOf('y');
         if (xi >= 0)
         {
-          xVal = line.substring(xi + 2).toInt(); // after "X:"
-          // if Y follows, X part may include Y, so parse up to non-digit
+          xVal = line.substring(xi + 2).toInt();
+
         }
         if (yi >= 0)
         {
           yVal = line.substring(yi + 2).toInt();
         }
-        // Map joystick -100..100 to differential drive
+
         Serial.print("[BT] Joystick X:");
         Serial.print(xVal);
         Serial.print(" Y:");
@@ -104,7 +99,7 @@ void RemoteControl::update()
         Serial.print(" raw:'");
         Serial.print(line);
         Serial.println("'");
-        // In AUTO mode ignore joystick drive (allow X toggle back only)
+
         if (RobotControl::isLineFollower())
         {
           Serial.println("[BT] Joystick IGNORED in AUTO (press X for MANUAL)");
@@ -124,7 +119,7 @@ void RemoteControl::update()
           int16_t turn = (int16_t)(xVal * m_config.motorSpeedDuty / 100);
           int16_t left = base - turn;
           int16_t right = base + turn;
-          // clamp
+
           if (left > 255) left = 255;
           if (left < -255) left = -255;
           if (right > 255) right = 255;
@@ -133,7 +128,7 @@ void RemoteControl::update()
           Serial.print(left);
           Serial.print(" R:");
           Serial.println(right);
-          // drive
+
           if (left >= 0) setLeftMotor(true, (uint8_t)left);
           else setLeftMotor(false, (uint8_t)-left);
           if (right >= 0) setRightMotor(true, (uint8_t)right);
@@ -146,8 +141,6 @@ void RemoteControl::update()
     handleCommand(cmd);
   }
 
-  // holdTimeoutMs==0 => latch until 'Z'/speed 0 (gamepad single-press), else auto-stop after timeout
-  // Default 800ms, but main sets 0 for gamepad to keep spinning.
   if (m_lastMotionCommandMs > 0UL && m_config.holdTimeoutMs > 0UL)
   {
     const uint32_t nowMs = millis();
@@ -163,18 +156,16 @@ void RemoteControl::update()
 
 void RemoteControl::handleCommand(const char command)
 {
-  // Intercept global mode/speed first (A/M/T/X/C/Q/E/+/-).
-  // C = Circle +10 persistent. S handled dual below (STOP when moving / -10 when stopped).
-  // Digits ignored (gamepad trailing '0' after each button).
+
   RobotMode before = RobotControl::getMode();
   if (RobotControl::handleCommand(command))
   {
-    // Sync local speed from global (persistent last speed)
+
     m_config.motorSpeedDuty = RobotControl::getSpeed();
     RobotMode after = RobotControl::getMode();
     if (before != after)
     {
-      // Mode toggled via X/T/A/M - give feedback on BT + Serial
+
       stop();
       m_lastMotionCommandMs = 0UL;
       m_lastMotionCmd = 'S';
@@ -185,8 +176,8 @@ void RemoteControl::handleCommand(const char command)
     }
     else
     {
-      // Speed change (C/Q/E/+/-): echo + instantly re-apply to moving motors
-      m_lastSpeedChangeMs = millis(); // guard trailing '0' release suffix after C/E
+
+      m_lastSpeedChangeMs = millis();
       m_btSerial.print("SPEED -> ");
       m_btSerial.println(RobotControl::getSpeed());
       if (command == 'C' || command == 'c')
@@ -199,8 +190,7 @@ void RemoteControl::handleCommand(const char command)
         Serial.print("[Remote] speed -> ");
         Serial.println(RobotControl::getSpeed());
       }
-      // Instant effect: if latched motion active in MANUAL, re-drive at new speed
-      // (keeps last direction, speed persists). In AUTO, LineFollower.update() picks it up next loop.
+
       if (RobotControl::isManual() && m_lastMotionCommandMs != 0UL && m_lastMotionCmd != 'S')
       {
         reapplyLastMotion();
@@ -209,8 +199,6 @@ void RemoteControl::handleCommand(const char command)
     return;
   }
 
-  // In AUTO mode ignore motion drive (C/Q/E/X/A/M still work via intercept above,
-  // S/Z work via switch below). Z stops, S slows line follower.
   if (RobotControl::isLineFollower() && command != 'S' && command != 's' && command != 'Z' && command != 'z')
   {
     Serial.print("[BT] handle '");
@@ -219,19 +207,18 @@ void RemoteControl::handleCommand(const char command)
     return;
   }
 
-  // Print decoded action
   Serial.print("[BT] handle '");
   Serial.print(command);
   Serial.print("' -> ");
   switch (command)
   {
-    // GamePad: Arduino Bluetooth Controller sends F/U for forward, B/D for back
+
     case 'F':
     case 'f':
     case 'U':
     case 'u':
       Serial.println("FORWARD");
-      m_config.motorSpeedDuty = RobotControl::getSpeed(); // keep last speed, persistent
+      m_config.motorSpeedDuty = RobotControl::getSpeed();
       forward();
       m_lastMotionCmd = 'F';
       m_lastMotionCommandMs = millis();
@@ -266,7 +253,6 @@ void RemoteControl::handleCommand(const char command)
       m_lastMotionCommandMs = millis();
       break;
 
-    // Diagonal combos from Bluetooth RC Controller app
     case 'G':
     case 'g':
       Serial.println("FORWARD-LEFT");
@@ -310,9 +296,7 @@ void RemoteControl::handleCommand(const char command)
 
     case '0':
     case '\0':
-      // Gamepad RELEASE suffix (log: 'F'+'0','C'+'0','S'+'0', also 0x00 nulls): stop, keep speed.
-      // Guard: ignore trailing '0' <250ms after C/S/E speed change (button release suffix),
-      // otherwise D-pad release '0' stops press-and-hold motion.
+
       if (!RobotControl::isManual())
       {
         Serial.println("RELEASE ignored in AUTO");
@@ -335,11 +319,10 @@ void RemoteControl::handleCommand(const char command)
 
     case 'S':
     case 's':
-      // Square = speed -10 persistent (release is '0', not 'S', so safe to always decrease).
-      // Instant re-apply if moving.
+
       RobotControl::changeSpeed(-10);
       m_config.motorSpeedDuty = RobotControl::getSpeed();
-      m_lastSpeedChangeMs = millis(); // guard trailing '0' after Square
+      m_lastSpeedChangeMs = millis();
       Serial.print("SQUARE -10 -> ");
       Serial.println(RobotControl::getSpeed());
       m_btSerial.print("SPEED -> ");
@@ -352,14 +335,14 @@ void RemoteControl::handleCommand(const char command)
 
     default:
       Serial.println("IGNORED");
-      // Ignore unsupported commands (including '\r', '\n') but already printed raw
+
       break;
   }
 }
 
 void RemoteControl::reapplyLastMotion()
 {
-  // Re-drive stored direction at current m_config.motorSpeedDuty (instant speed change)
+
   m_config.motorSpeedDuty = RobotControl::getSpeed();
   switch (m_lastMotionCmd)
   {
@@ -371,7 +354,7 @@ void RemoteControl::reapplyLastMotion()
     case 'I': forwardRight(); break;
     case 'H': backwardLeft(); break;
     case 'J': backwardRight(); break;
-    default: return; // stopped, nothing to reapply
+    default: return;
   }
   m_lastMotionCommandMs = millis();
   Serial.print("[Remote] reapply ");
@@ -404,7 +387,7 @@ void RemoteControl::backward()
 
 void RemoteControl::left()
 {
-  // Pivot left at reduced turn power (softer turns)
+
   uint8_t t = (uint8_t)(m_config.motorSpeedDuty * m_config.turnScalePct / 100U);
   setLeftMotor(false, t);
   setRightMotor(true, t);
@@ -412,7 +395,7 @@ void RemoteControl::left()
 
 void RemoteControl::right()
 {
-  // Pivot right at reduced turn power (softer turns)
+
   uint8_t t = (uint8_t)(m_config.motorSpeedDuty * m_config.turnScalePct / 100U);
   setLeftMotor(true, t);
   setRightMotor(false, t);
@@ -420,7 +403,7 @@ void RemoteControl::right()
 
 void RemoteControl::forwardLeft()
 {
-  // Gentle forward-left: left slowed to 40%
+
   uint8_t left = (uint8_t)(m_config.motorSpeedDuty * 0.4f);
   setLeftMotor(true, left);
   setRightMotor(true, m_config.motorSpeedDuty);
@@ -450,7 +433,7 @@ void RemoteControl::backwardRight()
 void RemoteControl::setSpeed(uint8_t duty)
 {
   m_config.motorSpeedDuty = duty;
-  // Keep global in sync if called externally
+
   RobotControl::setSpeed(duty);
 }
 

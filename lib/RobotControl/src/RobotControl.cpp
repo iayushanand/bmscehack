@@ -3,20 +3,19 @@
 namespace RobotControl
 {
 
-// MANUAL / LINE_FOLLOWER
 RobotMode g_mode = RobotMode::MANUAL;
 uint8_t g_speed = 120U;
 uint8_t g_maxSpeed = 200U;
 uint8_t g_minSpeed = 0U;
-uint8_t g_ledPin = 2U; // ESP32 onboard LED
+uint8_t g_ledPin = 2U;
 
 void begin(RobotMode mode, uint8_t speed, uint8_t maxSpeed)
 {
   g_maxSpeed = maxSpeed;
   g_mode = mode;
-  setSpeed(speed); // clamps
+  setSpeed(speed);
   pinMode(g_ledPin, OUTPUT);
-  // initial LED state: MANUAL=ON, LINE_FOLLOWER=OFF (blink will handle)
+
   digitalWrite(g_ledPin, (g_mode == RobotMode::MANUAL) ? HIGH : LOW);
 }
 
@@ -30,11 +29,11 @@ void updateLed()
 {
   if (isManual())
   {
-    digitalWrite(g_ledPin, HIGH); // steady ON for manual
+    digitalWrite(g_ledPin, HIGH);
   }
   else
   {
-    // LINE_FOLLOWER: 1 sec blink (1s ON / 1s OFF -> toggle every 1000ms)
+
     static uint32_t lastToggleMs = 0;
     static bool ledState = false;
     uint32_t now = millis();
@@ -144,12 +143,12 @@ bool handleCommand(char c)
     case 'X':
     case 'x':
     {
-      // Debounce toggle (controller hold-to-repeat sends X repeatedly)
+
       static uint32_t lastToggleMs = 0;
       uint32_t now = millis();
       if (now - lastToggleMs < 400UL)
       {
-        return true; // consume but ignore rapid repeat
+        return true;
       }
       lastToggleMs = now;
       toggleMode();
@@ -159,20 +158,16 @@ bool handleCommand(char c)
     case 'Q':
     case 'q':
     case 'C':
-    case 'c': // Circle button = speed up, persistent
+    case 'c':
       changeSpeed(10);
       return true;
     case '-':
     case 'E':
     case 'e':
-      // NOTE: 'S'/Square NOT here - handled dual in RemoteControl:
-      // S while moving = STOP (D-pad release, speed kept), S while stopped = -10.
-      // This avoids D-pad release draining speed to 0.
+
       changeSpeed(-10);
       return true;
-    // NOTE: '0'..'9' presets REMOVED - gamepad sends trailing '0' after every
-    // button (e.g. 'C' + '0', 'S' + '0' in your log), which reset speed to 0.
-    // Use C/Q/+ and E/- for speed. Digits return false -> IGNORED.
+
     default:
       return false;
   }
@@ -191,4 +186,4 @@ void printState(Stream &out)
   out.println(")");
 }
 
-} // namespace RobotControl
+}

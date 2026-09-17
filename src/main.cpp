@@ -3,32 +3,25 @@
 #include <RemoteControl.h>
 #include <LineFollower.h>
 
-// Global instances - motors share same L298N pins/channels (26/27/25/14/12/33, ch 0/1)
-// RobotControl holds single source of truth: g_mode + g_speed
-// LineFollower lib owns everything line-related: 3xIR digital L=4 M=5 R=15,
-// middle black + sides white = centered, straight 100 / pivot 80 (see lib/LineFollower)
 static RemoteControl g_remoteControl;
-static LineFollower g_lineFollower; // lib defaults: 2 sensors, black line HIGH, fixed 80/100
+static LineFollower g_lineFollower;
 
-// Mode edge detector (AUTO burst itself lives in LineFollower::startAuto/update)
 static RobotMode s_prevMode = RobotMode::MANUAL;
 
 void setup()
 {
   Serial.begin(115200);
 
-  // Shared speed 100 default (controller Circle/Square adjust both manual + line live).
-  // Line follower: straight 100 / pivot 80, follows global (turn scales proportionally).
-  RobotControl::begin(RobotMode::MANUAL, 100U, 200U);
+  RobotControl::begin(RobotMode::MANUAL, 160U, 200U);
 
-  // Init motors once via RemoteControl; LineFollower reuses same pins
-  g_remoteControl.begin();      // syncs motorSpeedDuty from RobotControl::g_speed (100)
-  g_remoteControl.setHoldTimeout(0); // press-and-hold: press F/B/L/R to move, release (0) to stop
-  g_lineFollower.begin(false);  // false = don't re-init motors (line speeds fixed 80/100 from lib)
+  g_remoteControl.begin();
+  g_remoteControl.setHoldTimeout(0);
+  g_lineFollower.begin(false);
 
   Serial.println("=== LineFollower (3xIR 4/5/15, middle black) + Remote ===");
   RobotControl::printState(Serial);
-  Serial.println("Line: 3xIR digital L=4 M=5 R=15 (HIGH=black), centered=middle black+sides white, straight 100 pivot 80.");
+  Serial.println("Line: 3xIR digital L=4 M=5 R=15 (HIGH=black), centered=middle black+sides white, straight 160 pivot 128.");
+  Serial.println("Lost line (all white) -> reverse a little + forward a little till black found.");
   Serial.println("IR values stream every loop; all white -> motors STOP.");
   Serial.println("GamePad (Arduino Bluetooth Controller):");
   Serial.println("  D-Pad Up/U/F=forward Down/D/B=back Left=L Right=R G/I/H/J=diagonals Z=stop");
@@ -40,7 +33,7 @@ void setup()
 
 void loop()
 {
-  // ---- Handle USB Serial for global mode/speed (works in BOTH modes) ----
+
   while (Serial.available() > 0)
   {
     char c = (char)Serial.read();
@@ -51,18 +44,17 @@ void loop()
       g_remoteControl.printBTInfo(Serial);
       continue;
     }
-    // Try global handle first (mode + C/Q/E speed work in AUTO too, live effect)
+
     bool wasGlobal = RobotControl::handleCommand(c);
     if (wasGlobal)
     {
-      // Propagate shared global speed to both (line update() also auto-syncs every loop)
+
       g_remoteControl.setSpeed(RobotControl::getSpeed());
       g_lineFollower.setBaseSpeed(RobotControl::getSpeed());
 
       Serial.print("-> ");
       RobotControl::printState(Serial);
 
-      // Safety stop on mode switch
       if (RobotControl::isManual())
       {
         g_lineFollower.stop();
@@ -73,14 +65,14 @@ void loop()
       }
       continue;
     }
-    // Otherwise forward to RemoteControl motion if in MANUAL
+
     if (RobotControl::isManual())
     {
       g_remoteControl.handleCommand(c);
     }
     else
     {
-      // In AUTO, allow S/Z via RemoteControl even from USB (affects MANUAL speed only)
+
       if (c == 'S' || c == 's' || c == 'Z' || c == 'z')
       {
         g_remoteControl.handleCommand(c);
@@ -88,17 +80,14 @@ void loop()
     }
   }
 
-  // ---- Always poll BT (critical: also in AUTO so X toggles back + speed works in AUTO) ----
-  // C/Q/+/-10, E/-10, S(-10), X/A/M work in AUTO via intercept; motion F/B/L/R ignored in AUTO.
   g_remoteControl.update();
 
-  // ---- MANUAL -> AUTO edge: delegate burst to LineFollower lib ----
   RobotMode curMode = RobotControl::getMode();
   if (s_prevMode == RobotMode::MANUAL && curMode == RobotMode::LINE_FOLLOWER)
   {
-    uint8_t spd = RobotControl::getSpeed(); // controller-adjustable, default 70
-    g_remoteControl.stop(); // ensure clean start
-    g_lineFollower.startAuto(); // 10ms forward nudge, then PID (inside lib)
+    uint8_t spd = RobotControl::getSpeed();
+    g_remoteControl.stop();
+    g_lineFollower.startAuto();
     Serial.print("-> AUTO line follow at speed ");
     Serial.println(spd);
     g_remoteControl.getBTStream().print("AUTO speed ");
@@ -106,22 +95,20 @@ void loop()
   }
   else if (s_prevMode == RobotMode::LINE_FOLLOWER && curMode == RobotMode::MANUAL)
   {
-    g_lineFollower.cancelAuto(); // abort burst if toggled back mid-burst
+    g_lineFollower.cancelAuto();
     Serial.println("-> MANUAL");
   }
   s_prevMode = curMode;
 
-  // ---- Onboard LED: MANUAL=ON, AUTO=1s blink ----
   RobotControl::updateLed();
 
-  // ---- Run active mode (burst + PID fully inside LineFollower::update) ----
   if (RobotControl::isLineFollower())
   {
     g_lineFollower.update();
   }
   else
   {
-    // MANUAL: BT already polled above.
+
     if (RobotControl::isLineFollower())
     {
       g_remoteControl.stop();
